@@ -1,6 +1,9 @@
+music
+
 *.png
 *.wav
 *.log
+
 
 *.py[cod]
 
