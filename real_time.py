@@ -5,11 +5,12 @@ import sys, struct
 from ctypes import *
 from contextlib import contextmanager
 import wave
-import time
+import time, math
 from pitchshift_fft import *
+import utils
+from numpy import *
 
 
-stream = None
 ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
 
 def py_error_handler(filename, line, function, err, fmt):
@@ -51,35 +52,30 @@ def play_audio(filepath):
 
         p.terminate()
 
-def start_speaker_stream():
-    p = pyaudio.PyAudio()
+def get_rms( data ):
+       # iterate over the block.
+    sum_squares = 0.0
+    for sample in data:
+        # sample is a signed short in +/- 32768.
+        # normalize it to 1.0
+        n = sample * (1.0/32768)
+        sum_squares += n*n
 
-    stream = p.open(format=pyaudio.paInt16,
-                    channels=2,
-                    rate=44100,
-                    output=True)
+    return math.sqrt( sum_squares / len(data) )
 
-def play(data):
-    if stream is None:
-        start_speaker_stream()
+def reduce(data):
+    for i in range(len(data)):
+        data[i] =0
+    return data
 
-    stream.write(data)
+def reduce_noise(data):
+    threshold = 0.005
 
-def callback(in_data, frame_count, time_info, status):
-    frames = list(chunks(unpack(in_data), frame_count))
-    play(frames)
+    amplitude = get_rms(data)
 
-    return (in_data, pyaudio.paContinue)
-
-def chunks(l, n):
-    for i in xrange(0, len(l), n):
-        yield l[i:i+n]
-
-def unpack(buffer):
-    return unpack_buffer(list(chunks(buffer, 2)))
-
-def unpack_buffer(buffer):
-    return [struct.unpack('h', frame)[0] for frame in buffer]
+    if amplitude < threshold:
+        data = reduce(data)
+    return data
 
 def capture_mic():
     p = pyaudio.PyAudio()
@@ -93,28 +89,31 @@ def capture_mic():
                     rate=44100,
                     output=True)
 
+    data_to_file = []
     chunk = 1024
     data = in_stream.read(chunk)
-    while data != '':
-        data = unpack(data)
+    # while data != '':
+    for i in range(600):
+        data = utils.unpack(data)
+        data = reduce_noise(data)
+        data = shift(data, shift_left, 5)
 
-        data = shift(data, shift_left, 10)
+        data_to_file.extend(data)
 
-        data = [struct.pack('h', i) for i in data]
+        data = utils.pack(data)
+
         data = ''.join(data)
-        out_stream.write(data)
-        data = in_stream.read(chunk)
 
-    # in_stream.start_stream()
-    # while in_stream.is_active():
-    #     time.sleep(0.1)
+        out_stream.write(data)
+
+        data = in_stream.read(chunk)
 
     in_stream.stop_stream()
     in_stream.close()
 
-    # stream.stop_stream()
-    # stream.close()
-
+    out_stream.stop_stream()
+    out_stream.close()
+    wav.write('test.wav',44100*2, array(data_to_file, dtype='int16'))
     p.terminate()
 
 if __name__ == "__main__":
