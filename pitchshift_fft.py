@@ -2,7 +2,51 @@ import numpy as np
 import scipy.io.wavfile as wav
 import sys
 import pyaudio
+from scipy import *
 
+
+def shift_pv(signalin, tscale):
+    ''' takes signalin which should be composition of two chunks size
+        where the second will be repeted for the next call '''
+    L = len(signalin)
+    N = L/2
+    H = N/2
+
+    # if it is stero convert to mono
+    # signalin = [signalin[i][0] for i in range(L)]
+
+
+    # signal blocks for processing and output
+    phi  = zeros(N)
+    out = zeros(N, dtype=complex)
+    sigout = zeros(L/tscale+N)
+
+    # max input amp, window
+    amp = max(signalin)
+    win = hanning(N)
+    p = 0
+    pp = 0
+
+    while p < L-(N+H):
+        print p, L, H, tscale
+        # take the spectra of two consecutive windows
+        p1 = int(p)
+        spec1 = fft(win*signalin[p1:p1+N])
+        spec2 = fft(win*signalin[p1+H:p1+N+H])
+
+        # take their phase difference and integrate
+        phi += (angle(spec2) - angle(spec1))
+        out.real, out.imag = cos(phi), sin(phi)
+
+        # inverse FFT and overlap-add
+        sigout[pp:pp+N] += win*ifft(abs(spec2)*out)
+        pp += H
+        p += H*tscale
+
+    # return middle chunk
+    print len(sigout), max(signalin), min(signalin)
+    return  sigout
+    # return (amp*sigout/max(sigout))[(L/4)*(3/4):(L/4)*(3/4) + L/4]
 
 def shift(data, shift_func, shift_size = 50):
     fft_data = np.fft.rfft(data)
